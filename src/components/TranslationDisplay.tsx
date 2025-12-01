@@ -1,27 +1,23 @@
 import React, { useEffect, useRef } from "react";
-
-interface TranslationSegment {
-  id: string;
-  arabic: string;
-  english: string;
-}
+import { TranslationRecord } from "@/lib/translationHistory";
 
 interface TranslationDisplayProps {
-  segments: TranslationSegment[];
+  translations: TranslationRecord[];
 }
 
 export default function TranslationDisplay({
-  segments,
+  translations,
 }: TranslationDisplayProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  // Translations are already sorted by RoomContext
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [segments]);
+  }, [translations]);
 
   return (
     <div className="w-full space-y-8 min-h-[400px] max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
-      {segments.length === 0 ? (
+      {translations.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 space-y-4">
           <div className="w-16 h-16 rounded-full bg-gradient-to-br from-emerald-500/20 to-blue-500/20 flex items-center justify-center">
             <svg
@@ -43,9 +39,9 @@ export default function TranslationDisplay({
           </p>
         </div>
       ) : (
-        segments.map((segment, index) => (
+        translations.map((translation, index) => (
           <div
-            key={segment.id}
+            key={translation.id}
             className="animate-fade-in-up"
             style={{ animationDelay: `${index * 0.1}s` }}
           >
@@ -56,7 +52,7 @@ export default function TranslationDisplay({
                   className="text-3xl md:text-4xl font-arabic leading-loose text-gray-100"
                   dir="rtl"
                 >
-                  {segment.arabic}
+                  {translation.sourceText}
                 </p>
               </div>
 
@@ -117,16 +113,12 @@ export default function TranslationDisplay({
             {/* English Translation */}
             <div className="text-left pl-2">
               <p className="text-lg text-gray-400 leading-relaxed">
-                {segment.english === "..." ? (
-                  <span className="shimmer inline-block w-64 h-6 rounded bg-gray-800"></span>
-                ) : (
-                  segment.english
-                )}
+                {translation.targetText}
               </p>
             </div>
 
             {/* Divider between verses */}
-            {index < segments.length - 1 && (
+            {index < translations.length - 1 && (
               <div className="mt-8 border-t border-gray-800/50"></div>
             )}
           </div>

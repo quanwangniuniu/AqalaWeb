@@ -1,28 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useAuth } from "@/contexts/AuthContext";
-import {
-  TranslationRecord,
-  subscribeToUserTranslations,
-} from "@/lib/translationHistory";
+import { useRoom } from "@/contexts/RoomContext";
+import { TranslationRecord } from "@/lib/translationHistory";
 
 export default function TranslationHistory() {
-  const { user } = useAuth();
-  const [items, setItems] = useState<TranslationRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { currentRoom, translations } = useRoom();
 
-  useEffect(() => {
-    if (!user) return;
-    setLoading(true);
-    const unsub = subscribeToUserTranslations(user.uid, (records) => {
-      setItems(records);
-      setLoading(false);
-    });
-    return () => unsub();
-  }, [user]);
+  // When in a room, show room translations. Otherwise, show nothing (or could show user history)
+  const items = currentRoom ? translations : [];
+  const loading = false;
 
-  if (!user) return null;
+  if (!currentRoom) return null;
 
   return (
     <section className="mt-10 border-t border-white/10 pt-6">

@@ -4,11 +4,20 @@ import { useState, useRef, useEffect } from "react";
 
 interface AudioRecorderProps {
   onAudioReady: (audioBlob: Blob) => void;
+  isSomeoneElseRecording?: boolean;
+  recordingUserName?: string;
+  updateRecordingState?: (isRecording: boolean) => Promise<void>;
 }
 
 const CHUNK_DURATION = 5000;
+const RECORDING_HEARTBEAT_INTERVAL = 10000; // Update every 10 seconds
 
-export default function AudioRecorder({ onAudioReady }: AudioRecorderProps) {
+export default function AudioRecorder({ 
+  onAudioReady, 
+  isSomeoneElseRecording = false,
+  recordingUserName,
+  updateRecordingState,
+}: AudioRecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [volumeLevel, setVolumeLevel] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -19,9 +28,19 @@ export default function AudioRecorder({ onAudioReady }: AudioRecorderProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const isRecordingRef = useRef<boolean>(false);
+  const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const startRecording = async () => {
+    if (isSomeoneElseRecording) {
+      return; // Don't start if someone else is recording
+    }
+
     try {
+      // Update recording state
+      if (updateRecordingState) {
+        await updateRecordingState(true);
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
@@ -33,6 +52,15 @@ export default function AudioRecorder({ onAudioReady }: AudioRecorderProps) {
       streamRef.current = stream;
       setIsRecording(true);
       isRecordingRef.current = true;
+
+      // Set up heartbeat to keep recording state alive
+      if (updateRecordingState) {
+        heartbeatIntervalRef.current = setInterval(async () => {
+          if (isRecordingRef.current) {
+            await updateRecordingState(true);
+          }
+        }, RECORDING_HEARTBEAT_INTERVAL);
+      }
 
       const audioContext = new (window.AudioContext ||
         (window as any).webkitAudioContext)();
@@ -151,10 +179,21 @@ export default function AudioRecorder({ onAudioReady }: AudioRecorderProps) {
     }
   };
 
-  const stopRecording = () => {
+  const stopRecording = async () => {
     setIsRecording(false);
     isRecordingRef.current = false;
     setVolumeLevel(0);
+
+    // Clear heartbeat
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
+    }
+
+    // Update recording state
+    if (updateRecordingState) {
+      await updateRecordingState(false);
+    }
 
     if (
       mediaRecorderRef.current &&
@@ -181,6 +220,17 @@ export default function AudioRecorder({ onAudioReady }: AudioRecorderProps) {
   useEffect(() => {
     return () => {
       isRecordingRef.current = false;
+      
+      // Clear heartbeat
+      if (heartbeatIntervalRef.current) {
+        clearInterval(heartbeatIntervalRef.current);
+      }
+
+      // Clear recording state on unmount
+      if (updateRecordingState && isRecording) {
+        updateRecordingState(false).catch(console.error);
+      }
+
       if (
         mediaRecorderRef.current &&
         mediaRecorderRef.current.state === "recording"
@@ -194,7 +244,7 @@ export default function AudioRecorder({ onAudioReady }: AudioRecorderProps) {
         audioContextRef.current.close();
       }
     };
-  }, []);
+  }, [isRecording, updateRecordingState]);
 
   return (
     <div className="flex flex-col items-center gap-6 w-full">
@@ -207,6 +257,16 @@ export default function AudioRecorder({ onAudioReady }: AudioRecorderProps) {
           className="w-full rounded-2xl border border-gray-800 shadow-lg"
         />
       </div>
+
+      {/* Recording status message */}
+      {isSomeoneElseRecording && !isRecording && (
+        <div className="flex items-center gap-2 text-sm text-amber-400 bg-amber-400/10 px-4 py-2 rounded-lg border border-amber-400/20">
+          <div className="w-2 h-2 bg-amber-400 rounded-full animate-pulse"></div>
+          <span>
+            {recordingUserName || "Someone"} is recording...
+          </span>
+        </div>
+      )}
 
       {/* Volume indicator */}
       {isRecording && (
@@ -234,14 +294,24 @@ export default function AudioRecorder({ onAudioReady }: AudioRecorderProps) {
       {/* Record button */}
       <button
         onClick={isRecording ? stopRecording : startRecording}
-        className={`group relative px-8 py-4 rounded-full font-semibold text-white transition-all duration-300 transform hover:scale-105 ${
-          isRecording
-            ? "bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 shadow-lg shadow-red-500/50"
-            : "bg-gradient-to-r from-emerald-600 to-blue-600 hover:from-emerald-500 hover:to-blue-500 shadow-lg shadow-emerald-500/50"
+        disabled={isSomeoneElseRecording && !isRecording}
+        className={`group relative px-8 py-4 rounded-full font-semibold text-white transition-all duration-300 transform ${
+          isSomeoneElseRecording && !isRecording
+            ? "bg-gray-600 cursor-not-allowed opacity-50"
+            : isRecording
+            ? "bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 shadow-lg shadow-red-500/50 hover:scale-105"
+            : "bg-gradient-to-r from-emerald-600 to-blue-600 hover:from-emerald-500 hover:to-blue-500 shadow-lg shadow-emerald-500/50 hover:scale-105"
         }`}
       >
         <span className="relative z-10 flex items-center gap-2">
-          {isRecording ? (
+          {isSomeoneElseRecording && !isRecording ? (
+            <>
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+              </svg>
+              Recording in progress...
+            </>
+          ) : isRecording ? (
             <>
               <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                 <rect x="6" y="6" width="8" height="8" rx="1" />

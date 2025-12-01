@@ -36,4 +36,36 @@ export async function addTranslationForUserAdmin(
   }
 }
 
+export async function addTranslationToRoomAdmin(
+  roomId: string,
+  userId: string,
+  record: AdminTranslationRecord
+) {
+  // Check if Firebase Admin is properly initialized
+  if (!isFirebaseAdminInitialized()) {
+    throw new Error(
+      "Firebase Admin SDK not initialized. Please set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY environment variables."
+    );
+  }
+
+  try {
+    const db = getFirestore();
+    const colRef = db
+      .collection("rooms")
+      .doc(roomId)
+      .collection("translations");
+
+    await colRef.add({
+      ...record,
+      createdBy: userId,
+      createdAt: Timestamp.now(),
+    });
+  } catch (error) {
+    // Re-throw with more context
+    throw new Error(
+      `Failed to save room translation: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
 

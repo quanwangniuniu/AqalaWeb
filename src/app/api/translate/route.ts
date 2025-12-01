@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { getAuth } from "firebase-admin/auth";
-import { addTranslationForUserAdmin } from "@/lib/translationHistoryAdmin";
+import {
+  addTranslationForUserAdmin,
+  addTranslationToRoomAdmin,
+} from "@/lib/translationHistoryAdmin";
 import { isFirebaseAdminInitialized } from "@/lib/firebaseAdmin";
 
 const openai = new OpenAI({
@@ -48,7 +51,7 @@ export async function POST(request: Request) {
     const uid = decoded.uid;
     console.log(`[Translate API] Authenticated user: ${uid}`);
 
-    const { text } = await request.json();
+    const { text, roomId } = await request.json();
 
     if (!text) {
       return NextResponse.json(
@@ -76,23 +79,43 @@ export async function POST(request: Request) {
 
     // Save translation history (non-blocking - don't fail translation if history save fails)
     if (isFirebaseAdminInitialized()) {
-      addTranslationForUserAdmin(uid, {
+      const translationRecord = {
         sourceText: text,
         sourceLang: "ar",
         targetText: translation,
         targetLang: "en",
         metadata: {},
-      })
-        .then(() => {
-          console.log(`[Translate API] Translation history saved for user ${uid}`);
-        })
-        .catch((error) => {
-          // Log error but don't block the translation response
-          console.error(
-            `[Translate API] Failed to save translation history for user ${uid}:`,
-            error
-          );
-        });
+      };
+
+      if (roomId) {
+        // Save to room
+        addTranslationToRoomAdmin(roomId, uid, translationRecord)
+          .then(() => {
+            console.log(
+              `[Translate API] Translation saved to room ${roomId} by user ${uid}`
+            );
+          })
+          .catch((error) => {
+            console.error(
+              `[Translate API] Failed to save translation to room ${roomId}:`,
+              error
+            );
+          });
+      } else {
+        // Save to user (backward compatibility)
+        addTranslationForUserAdmin(uid, translationRecord)
+          .then(() => {
+            console.log(
+              `[Translate API] Translation history saved for user ${uid}`
+            );
+          })
+          .catch((error) => {
+            console.error(
+              `[Translate API] Failed to save translation history for user ${uid}:`,
+              error
+            );
+          });
+      }
     } else {
       console.warn(
         "[Translate API] Skipping history save - Firebase Admin not initialized"

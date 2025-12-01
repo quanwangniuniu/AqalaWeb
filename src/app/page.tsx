@@ -1,22 +1,23 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import AudioRecorder from "@/components/AudioRecorder";
 import TranslationDisplay from "@/components/TranslationDisplay";
 import { useAuth } from "@/contexts/AuthContext";
+import { useRoom } from "@/contexts/RoomContext";
 import TranslationHistory from "@/components/TranslationHistory";
-
-interface TranslationSegment {
-  id: string;
-  arabic: string;
-  english: string;
-}
+import RoomSelector from "@/components/RoomSelector";
+import RoomManager from "@/components/RoomManager";
 
 export default function Home() {
-  const [segments, setSegments] = useState<TranslationSegment[]>([]);
   const { user, loading, signOut } = useAuth();
+  const { currentRoom, translations, addLocalTranslation, recordingState, updateRecordingState } = useRoom();
   const router = useRouter();
+
+  // Check if someone else is recording
+  const isSomeoneElseRecording = recordingState !== null && user ? recordingState.userId !== user.uid : false;
+  const recordingUserName = recordingState?.userName;
 
   useEffect(() => {
     if (!loading && !user) {
@@ -26,74 +27,69 @@ export default function Home() {
 
   const handleAudioReady = useCallback(
     async (audioBlob: Blob) => {
-    const tempId = Date.now().toString();
+      if (!currentRoom) {
+        console.error("No room selected, cannot save translation");
+        return;
+      }
 
-    try {
-      // 1. Transcribe
-      const formData = new FormData();
-      formData.append("file", audioBlob, "audio.webm");
+      try {
+        // 1. Transcribe
+        const formData = new FormData();
+        formData.append("file", audioBlob, "audio.webm");
 
-      const transcribeRes = await fetch("/api/transcribe", {
-        method: "POST",
-        body: formData,
-      });
+        const transcribeRes = await fetch("/api/transcribe", {
+          method: "POST",
+          body: formData,
+        });
 
-      if (!transcribeRes.ok) throw new Error("Transcription failed");
+        if (!transcribeRes.ok) throw new Error("Transcription failed");
 
-      const { text: arabicText } = await transcribeRes.json();
+        const { text: arabicText } = await transcribeRes.json();
 
-      console.log("Transcription received:", arabicText);
+        console.log("Transcription received:", arabicText);
 
-      if (!arabicText || arabicText.trim() === "") return;
+        if (!arabicText || arabicText.trim() === "") return;
 
-      // Add new segment with Arabic
-      setSegments((prev) => [
-        ...prev,
-        {
-          id: tempId,
-          arabic: arabicText,
-          english: "...",
-        },
-      ]);
-
-      // 2. Translate
-      (async () => {
-        try {
-          if (!user) {
-            console.error("No user authenticated, cannot translate");
-            throw new Error("User not authenticated");
-          }
-
-          const idToken = await user.getIdToken();
-
-          const translateRes = await fetch("/api/translate", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${idToken}`,
-            },
-            body: JSON.stringify({ text: arabicText }),
-          });
-
-          if (!translateRes.ok) throw new Error("Translation failed");
-
-          const { text: englishText } = await translateRes.json();
-
-          // Update segment with English
-          setSegments((prev) =>
-            prev.map((seg) =>
-              seg.id === tempId ? { ...seg, english: englishText } : seg
-            )
-          );
-        } catch (translateError) {
-          console.error("Translation error:", translateError);
+        // 2. Translate
+        if (!user) {
+          console.error("No user authenticated, cannot translate");
+          throw new Error("User not authenticated");
         }
-      })();
-    } catch (error) {
-      console.error("Processing error:", error);
-    }
+
+        const idToken = await user.getIdToken();
+
+        const translateRes = await fetch("/api/translate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({
+            text: arabicText,
+            roomId: currentRoom.id,
+          }),
+        });
+
+        if (!translateRes.ok) throw new Error("Translation failed");
+
+        const { text: englishText } = await translateRes.json();
+
+        // Add translation to local state immediately (will show on screen right away)
+        // RoomContext will attempt to save to Firestore using client SDK
+        addLocalTranslation({
+          sourceText: arabicText,
+          sourceLang: "ar",
+          targetText: englishText,
+          targetLang: "en",
+          metadata: {},
+        });
+
+        console.log("[Client] Translation added to room:", currentRoom.id);
+      } catch (error) {
+        console.error("Processing error:", error);
+      }
     },
-    [user]
+    [user, currentRoom]
   );
 
   return (
@@ -110,6 +106,7 @@ export default function Home() {
             </p>
           </div>
           <div className="flex items-center gap-3">
+            {currentRoom && <RoomManager />}
             {user && (
               <div className="text-right">
                 <p className="text-xs text-gray-400">Signed in as</p>
@@ -129,15 +126,24 @@ export default function Home() {
         </header>
 
         {/* Main content */}
-        <div className="space-y-8">
-          <AudioRecorder onAudioReady={handleAudioReady} />
+        {!currentRoom ? (
+          <RoomSelector />
+        ) : (
+          <div className="space-y-8">
+            <AudioRecorder 
+              onAudioReady={handleAudioReady}
+              isSomeoneElseRecording={isSomeoneElseRecording}
+              recordingUserName={recordingUserName}
+              updateRecordingState={updateRecordingState}
+            />
 
-          <div className="pt-8">
-            <TranslationDisplay segments={segments} />
+            <div className="pt-8">
+              <TranslationDisplay translations={translations} />
+            </div>
+
+            <TranslationHistory />
           </div>
-
-          <TranslationHistory />
-        </div>
+        )}
       </div>
     </main>
   );
