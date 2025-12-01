@@ -49,6 +49,13 @@ export default function AudioRecorder({
           autoGainControl: true,
         },
       });
+      
+      // Ensure all tracks are enabled
+      stream.getTracks().forEach(track => {
+        track.enabled = true;
+        console.log("[AudioRecorder] Track:", track.kind, "enabled:", track.enabled, "readyState:", track.readyState);
+      });
+      
       streamRef.current = stream;
       setIsRecording(true);
       isRecordingRef.current = true;
@@ -75,12 +82,24 @@ export default function AudioRecorder({
       const audioContext = new (window.AudioContext ||
         (window as any).webkitAudioContext)();
       audioContextRef.current = audioContext;
+      
+      // Resume AudioContext if suspended (required by browsers)
+      if (audioContext.state === "suspended") {
+        await audioContext.resume();
+      }
+      
       const analyser = audioContext.createAnalyser();
       analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.8;
       analyserRef.current = analyser;
+      
       const source = audioContext.createMediaStreamSource(stream);
       sourceRef.current = source;
       source.connect(analyser);
+      
+      console.log("[AudioRecorder] AudioContext state:", audioContext.state);
+      console.log("[AudioRecorder] Stream active:", stream.active);
+      console.log("[AudioRecorder] Stream tracks:", stream.getTracks().map(t => ({ kind: t.kind, enabled: t.enabled, readyState: t.readyState })));
 
       if (canvasRef.current) {
         const canvas = canvasRef.current;
@@ -90,14 +109,33 @@ export default function AudioRecorder({
           const dataArray = new Uint8Array(bufferLength);
 
           const draw = () => {
-            if (!isRecordingRef.current) return;
-            requestAnimationFrame(draw);
-
-            analyser.getByteFrequencyData(dataArray);
-
-            const average =
-              dataArray.reduce((a, b) => a + b) / dataArray.length;
-            setVolumeLevel(Math.round(average));
+            if (!isRecordingRef.current || !analyserRef.current || !canvasCtx) return;
+            
+            // Use the ref to ensure we're using the current analyser
+            const currentAnalyser = analyserRef.current;
+            
+            // Get frequency data for visualization
+            currentAnalyser.getByteFrequencyData(dataArray);
+            
+            // Also get time domain data for better volume detection
+            const timeDataArray = new Uint8Array(bufferLength);
+            currentAnalyser.getByteTimeDomainData(timeDataArray);
+            
+            // Calculate volume from frequency data
+            const frequencyAverage = dataArray.reduce((a, b) => a + b) / dataArray.length;
+            
+            // Calculate volume from time domain data (more accurate for overall volume)
+            let sum = 0;
+            for (let i = 0; i < timeDataArray.length; i++) {
+              const normalized = (timeDataArray[i] - 128) / 128;
+              sum += normalized * normalized;
+            }
+            const rms = Math.sqrt(sum / timeDataArray.length);
+            const timeDomainVolume = Math.round(rms * 255);
+            
+            // Use the higher of the two for better responsiveness
+            const volume = Math.max(Math.round(frequencyAverage), timeDomainVolume);
+            setVolumeLevel(volume);
 
             // Clear with gradient background
             const gradient = canvasCtx.createLinearGradient(
@@ -183,6 +221,21 @@ export default function AudioRecorder({
       };
 
       startSegment();
+      
+      // Verify AudioContext is running
+      setTimeout(() => {
+        if (audioContextRef.current) {
+          console.log("[AudioRecorder] AudioContext state after setup:", audioContextRef.current.state);
+          if (audioContextRef.current.state === "suspended") {
+            console.warn("[AudioRecorder] AudioContext is suspended, attempting to resume...");
+            audioContextRef.current.resume().then(() => {
+              console.log("[AudioRecorder] AudioContext resumed successfully");
+            }).catch((error) => {
+              console.error("[AudioRecorder] Failed to resume AudioContext:", error);
+            });
+          }
+        }
+      }, 100);
     } catch (err) {
       console.error("Error accessing microphone:", err);
       
