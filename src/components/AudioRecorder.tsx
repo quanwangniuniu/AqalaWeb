@@ -109,7 +109,13 @@ export default function AudioRecorder({
           const dataArray = new Uint8Array(bufferLength);
 
           const draw = () => {
-            if (!isRecordingRef.current || !analyserRef.current || !canvasCtx) return;
+            if (!isRecordingRef.current || !analyserRef.current || !canvasCtx) {
+              // Stop the animation loop if recording stopped
+              return;
+            }
+            
+            // Continue the animation loop
+            requestAnimationFrame(draw);
             
             // Use the ref to ensure we're using the current analyser
             const currentAnalyser = analyserRef.current;
@@ -177,6 +183,7 @@ export default function AudioRecorder({
               x += barWidth;
             }
           };
+          // Start the animation loop
           draw();
         }
       }
@@ -222,9 +229,9 @@ export default function AudioRecorder({
 
       startSegment();
       
-      // Verify AudioContext is running
+      // Verify AudioContext is running after a short delay
       setTimeout(() => {
-        if (audioContextRef.current) {
+        if (audioContextRef.current && isRecordingRef.current) {
           console.log("[AudioRecorder] AudioContext state after setup:", audioContextRef.current.state);
           if (audioContextRef.current.state === "suspended") {
             console.warn("[AudioRecorder] AudioContext is suspended, attempting to resume...");
@@ -233,6 +240,9 @@ export default function AudioRecorder({
             }).catch((error) => {
               console.error("[AudioRecorder] Failed to resume AudioContext:", error);
             });
+          } else if (audioContextRef.current.state === "closed") {
+            console.error("[AudioRecorder] ERROR: AudioContext was closed prematurely!");
+            // Don't try to recreate here - let the user restart recording
           }
         }
       }, 100);
@@ -306,6 +316,7 @@ export default function AudioRecorder({
     audioContextRef.current = null;
   };
 
+  // Cleanup on unmount only - don't run on every state change
   useEffect(() => {
     return () => {
       isRecordingRef.current = false;
@@ -317,7 +328,7 @@ export default function AudioRecorder({
       }
 
       // Clear recording state on unmount
-      if (updateRecordingState && isRecording) {
+      if (updateRecordingState) {
         updateRecordingState(false).catch(console.error);
       }
 
@@ -337,7 +348,7 @@ export default function AudioRecorder({
         });
       }
     };
-  }, [isRecording, updateRecordingState]);
+  }, []); // Empty dependency array - only run on unmount
 
   return (
     <div className="flex flex-col items-center gap-6 w-full">
