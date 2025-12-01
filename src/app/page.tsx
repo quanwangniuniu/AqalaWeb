@@ -9,6 +9,7 @@ import { useRoom } from "@/contexts/RoomContext";
 import TranslationHistory from "@/components/TranslationHistory";
 import RoomSelector from "@/components/RoomSelector";
 import RoomManager from "@/components/RoomManager";
+import UserMenu from "@/components/UserMenu";
 
 export default function Home() {
   const { user, loading, signOut } = useAuth();
@@ -94,35 +95,30 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-[#1a1d1f]">
-      <div className="max-w-5xl mx-auto px-4 py-8 md:py-12">
+      <div className="max-w-5xl mx-auto px-4 py-6 md:py-8">
         {/* Header */}
-        <header className="mb-8 flex items-center justify-between gap-4">
-          <div className="space-y-1">
-            <h1 className="text-3xl md:text-4xl font-bold text-white tracking-tight">
-              Aqala
-            </h1>
-            <p className="text-gray-500 text-sm">
-              Real-time Quranic transcription & translation
-            </p>
+        <header className="mb-8 md:mb-10">
+          {/* Top Row: Title and User Menu */}
+          <div className="flex items-start justify-between gap-4 mb-4 md:mb-6">
+            <div className="space-y-1">
+              <h1 className="text-3xl md:text-4xl font-bold text-white tracking-tight">
+                Aqala
+              </h1>
+              <p className="text-gray-500 text-sm">
+                Real-time Quranic transcription & translation
+              </p>
+            </div>
+            <div className="flex-shrink-0">
+              <UserMenu />
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-            {currentRoom && <RoomManager />}
-            {user && (
-              <div className="text-right">
-                <p className="text-xs text-gray-400">Signed in as</p>
-                <p className="text-sm text-white font-medium">
-                  {user.displayName || user.email}
-                </p>
-              </div>
-            )}
-            <button
-              type="button"
-              onClick={() => signOut().then(() => router.push("/login"))}
-              className="text-xs md:text-sm px-3 py-1.5 rounded-md border border-white/10 text-gray-200 hover:bg-white/5 transition-colors"
-            >
-              Log out
-            </button>
-          </div>
+
+          {/* Bottom Row: Room Controls */}
+          {currentRoom && (
+            <div className="flex items-center gap-3 pt-4 md:pt-5 border-t border-white/5">
+              <RoomManager />
+            </div>
+          )}
         </header>
 
         {/* Main content */}
