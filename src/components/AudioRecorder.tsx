@@ -62,6 +62,16 @@ export default function AudioRecorder({
         }, RECORDING_HEARTBEAT_INTERVAL);
       }
 
+      // Clean up any existing AudioContext before creating a new one
+      if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+        try {
+          await audioContextRef.current.close();
+        } catch (error) {
+          console.error("Error closing existing AudioContext:", error);
+        }
+      }
+      
+      // Create new AudioContext
       const audioContext = new (window.AudioContext ||
         (window as any).webkitAudioContext)();
       audioContextRef.current = audioContext;
@@ -175,6 +185,27 @@ export default function AudioRecorder({
       startSegment();
     } catch (err) {
       console.error("Error accessing microphone:", err);
+      
+      // Clean up on error
+      isRecordingRef.current = false;
+      setIsRecording(false);
+      
+      // Clear recording state
+      if (updateRecordingState) {
+        updateRecordingState(false).catch(console.error);
+      }
+      
+      // Clean up resources
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+      }
+      
+      if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+        audioContextRef.current.close().catch(console.error);
+        audioContextRef.current = null;
+      }
+      
       alert("Error accessing microphone. Please check permissions.");
     }
   };
@@ -207,8 +238,13 @@ export default function AudioRecorder({
       streamRef.current = null;
     }
 
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
+    // Close AudioContext only if it's not already closed
+    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+      try {
+        await audioContextRef.current.close();
+      } catch (error) {
+        console.error("Error closing AudioContext:", error);
+      }
     }
 
     mediaRecorderRef.current = null;
@@ -224,6 +260,7 @@ export default function AudioRecorder({
       // Clear heartbeat
       if (heartbeatIntervalRef.current) {
         clearInterval(heartbeatIntervalRef.current);
+        heartbeatIntervalRef.current = null;
       }
 
       // Clear recording state on unmount
@@ -240,8 +277,11 @@ export default function AudioRecorder({
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
       }
-      if (audioContextRef.current) {
-        audioContextRef.current.close();
+      // Close AudioContext only if it exists and is not already closed
+      if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+        audioContextRef.current.close().catch((error) => {
+          console.error("Error closing AudioContext in cleanup:", error);
+        });
       }
     };
   }, [isRecording, updateRecordingState]);
