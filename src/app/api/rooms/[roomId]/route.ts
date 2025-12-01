@@ -5,7 +5,7 @@ import { isFirebaseAdminInitialized } from "@/lib/firebaseAdmin";
 
 export async function GET(
   request: Request,
-  { params }: { params: { roomId: string } }
+  { params }: { params: Promise<{ roomId: string }> }
 ) {
   if (!isFirebaseAdminInitialized()) {
     return NextResponse.json(
@@ -34,7 +34,7 @@ export async function GET(
       );
     }
 
-    const { roomId } = params;
+    const { roomId } = await params;
     const db = getFirestore();
     const roomDoc = await db.collection("rooms").doc(roomId).get();
 
@@ -59,7 +59,7 @@ export async function GET(
 
 export async function DELETE(
   request: Request,
-  { params }: { params: { roomId: string } }
+  { params }: { params: Promise<{ roomId: string }> }
 ) {
   if (!isFirebaseAdminInitialized()) {
     return NextResponse.json(
@@ -88,7 +88,7 @@ export async function DELETE(
       );
     }
 
-    const { roomId } = params;
+    const { roomId } = await params;
     const db = getFirestore();
     const roomRef = db.collection("rooms").doc(roomId);
     const roomDoc = await roomRef.get();
