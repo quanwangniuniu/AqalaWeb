@@ -51,6 +51,101 @@ function containsThankYouForWatching(text: string): boolean {
   return false;
 }
 
+// Strict filter for common Whisper hallucinations (especially "you're welcome")
+function containsHallucination(text: string): boolean {
+  const normalized = text.toLowerCase().trim();
+  
+  // English patterns for "you're welcome" and similar
+  const englishPatterns = [
+    "you're welcome",
+    "youre welcome",
+    "you are welcome",
+    "your welcome",
+    "ur welcome",
+    "welcome",
+    "no problem",
+    "no worries",
+    "anytime",
+  ];
+  
+  // Check exact matches or contains
+  for (const pattern of englishPatterns) {
+    if (normalized.includes(pattern.toLowerCase()) || 
+        normalized === pattern.toLowerCase() ||
+        text.toLowerCase().includes(pattern.toLowerCase())) {
+      return true;
+    }
+  }
+  
+  // Check Arabic patterns (common hallucinations)
+  const arabicPatterns = [
+    "عفواً",
+    "عفوا",
+    "أهلاً بك",
+    "أهلا بك",
+    "أهلاً",
+    "أهلا",
+    "مرحباً",
+    "مرحبا",
+  ];
+  
+  for (const pattern of arabicPatterns) {
+    if (text.includes(pattern)) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+// Strict filter for repeated character patterns (e.g., "JJJJJJ...", "AAAAAA...")
+function containsRepeatedCharacters(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length < 10) return false; // Too short to be a problem
+  
+  // Remove spaces to check for character repetition
+  const withoutSpaces = trimmed.replace(/\s+/g, '');
+  if (withoutSpaces.length < 10) return false;
+  
+  // Check if a single character repeats too many times
+  // If more than 70% of characters are the same, it's likely an artifact
+  const charCounts = new Map<string, number>();
+  for (const char of withoutSpaces) {
+    charCounts.set(char, (charCounts.get(char) || 0) + 1);
+  }
+  
+  const maxCount = Math.max(...Array.from(charCounts.values()));
+  const repetitionRatio = maxCount / withoutSpaces.length;
+  
+  // If single character makes up more than 70% of text, it's a repetition artifact
+  if (repetitionRatio > 0.7) {
+    return true;
+  }
+  
+  // Also check for short pattern repetition (e.g., "ABABABAB..." or "ABCABCABC...")
+  // Check 1-3 character patterns
+  for (let patternLen = 1; patternLen <= 3; patternLen++) {
+    if (withoutSpaces.length < patternLen * 5) continue;
+    
+    const pattern = withoutSpaces.substring(0, patternLen);
+    let matches = 0;
+    for (let i = 0; i < withoutSpaces.length - patternLen + 1; i += patternLen) {
+      if (withoutSpaces.substring(i, i + patternLen) === pattern) {
+        matches++;
+      } else {
+        break;
+      }
+    }
+    
+    // If pattern repeats more than 5 times consecutively, it's likely an artifact
+    if (matches >= 5) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
 // Load Quran data once at startup
 let quranText: string = '';
 let quranData: any = null;
@@ -130,13 +225,34 @@ export async function POST(request: Request) {
       if (lowConfidence.length > 0) {
         console.log(`[Transcribe] Warning: ${lowConfidence.length} low-confidence segments`);
       }
+      
+      // STRICT FILTER: If all segments have high no_speech_prob, reject entirely
+      const allSegmentsLowConfidence = transcription.segments.every(
+        (seg: any) => seg.no_speech_prob > 0.5
+      );
+      if (allSegmentsLowConfidence && transcription.segments.length > 0) {
+        console.log(`[Transcribe] STRICT FILTER: All segments have low confidence (silence) - returning empty`);
+        return NextResponse.json({ text: "" });
+      }
     }
 
     console.log(`[Transcribe] Result: "${transcription.text}"`);
 
+    // STRICT FILTER: If repeated characters detected, completely ignore
+    if (containsRepeatedCharacters(transcription.text)) {
+      console.log(`[Transcribe] STRICT FILTER: Detected repeated character pattern - returning empty`);
+      return NextResponse.json({ text: "" });
+    }
+
     // STRICT FILTER: If "Thank you for watching" is detected, completely ignore
     if (containsThankYouForWatching(transcription.text)) {
       console.log(`[Transcribe] STRICT FILTER: Detected "Thank you for watching" - returning empty`);
+      return NextResponse.json({ text: "" });
+    }
+
+    // STRICT FILTER: If hallucinations like "you're welcome" are detected, completely ignore
+    if (containsHallucination(transcription.text)) {
+      console.log(`[Transcribe] STRICT FILTER: Detected hallucination - returning empty`);
       return NextResponse.json({ text: "" });
     }
 
@@ -169,6 +285,18 @@ export async function POST(request: Request) {
     // Final check: if after cleaning it still contains the pattern, return empty
     if (containsThankYouForWatching(cleanText)) {
       console.log(`[Transcribe] STRICT FILTER: Still contains pattern after cleaning - returning empty`);
+      return NextResponse.json({ text: "" });
+    }
+    
+    // Final check: if after cleaning it still contains hallucinations, return empty
+    if (containsHallucination(cleanText)) {
+      console.log(`[Transcribe] STRICT FILTER: Still contains hallucination after cleaning - returning empty`);
+      return NextResponse.json({ text: "" });
+    }
+    
+    // Final check: if after cleaning it still contains repeated characters, return empty
+    if (containsRepeatedCharacters(cleanText)) {
+      console.log(`[Transcribe] STRICT FILTER: Still contains repeated characters after cleaning - returning empty`);
       return NextResponse.json({ text: "" });
     }
     
