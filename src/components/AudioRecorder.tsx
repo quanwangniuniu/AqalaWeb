@@ -11,6 +11,8 @@ interface AudioRecorderProps {
 
 const CHUNK_DURATION = 5000;
 const RECORDING_HEARTBEAT_INTERVAL = 10000; // Update every 10 seconds
+const SILENCE_THRESHOLD = 10; // Volume level below which we consider it silence
+const SILENCE_TIMEOUT = 30000; // 30 seconds in milliseconds
 
 export default function AudioRecorder({ 
   onAudioReady, 
@@ -29,6 +31,7 @@ export default function AudioRecorder({
   const streamRef = useRef<MediaStream | null>(null);
   const isRecordingRef = useRef<boolean>(false);
   const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const silenceStartTimeRef = useRef<number | null>(null);
 
   const startRecording = async () => {
     if (isSomeoneElseRecording) {
@@ -59,6 +62,7 @@ export default function AudioRecorder({
       streamRef.current = stream;
       setIsRecording(true);
       isRecordingRef.current = true;
+      silenceStartTimeRef.current = null; // Reset silence timer when starting recording
 
       // Set up heartbeat to keep recording state alive
       if (updateRecordingState) {
@@ -142,6 +146,34 @@ export default function AudioRecorder({
             // Use the higher of the two for better responsiveness
             const volume = Math.max(Math.round(frequencyAverage), timeDomainVolume);
             setVolumeLevel(volume);
+
+            // Silence detection for auto-stop
+            const now = Date.now();
+            if (volume < SILENCE_THRESHOLD) {
+              // Volume is below threshold - track silence
+              if (silenceStartTimeRef.current === null) {
+                // Start tracking silence
+                silenceStartTimeRef.current = now;
+                console.log(`[AudioRecorder] Silence detected, starting timer`);
+              } else {
+                // Check if silence has exceeded timeout
+                const silenceDuration = now - silenceStartTimeRef.current;
+                if (silenceDuration >= SILENCE_TIMEOUT) {
+                  console.log(`[AudioRecorder] Silence exceeded ${SILENCE_TIMEOUT}ms, auto-stopping recording`);
+                  // Auto-stop recording (fire and forget - stopRecording handles cleanup)
+                  stopRecording().catch((error) => {
+                    console.error("[AudioRecorder] Error during auto-stop:", error);
+                  });
+                  return; // Exit draw loop
+                }
+              }
+            } else {
+              // Volume is above threshold - reset silence timer
+              if (silenceStartTimeRef.current !== null) {
+                console.log(`[AudioRecorder] Sound detected, resetting silence timer`);
+                silenceStartTimeRef.current = null;
+              }
+            }
 
             // Clear with gradient background
             const gradient = canvasCtx.createLinearGradient(
@@ -277,6 +309,7 @@ export default function AudioRecorder({
     setIsRecording(false);
     isRecordingRef.current = false;
     setVolumeLevel(0);
+    silenceStartTimeRef.current = null; // Clear silence timer when stopping
 
     // Clear heartbeat
     if (heartbeatIntervalRef.current) {

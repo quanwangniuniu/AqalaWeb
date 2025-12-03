@@ -89,6 +89,101 @@ function containsThankYouForWatching(text: string): boolean {
   return false;
 }
 
+// Strict filter for common Whisper hallucinations (especially "you're welcome")
+function containsHallucination(text: string): boolean {
+  const normalized = text.toLowerCase().trim();
+  
+  // English patterns for "you're welcome" and similar
+  const englishPatterns = [
+    "you're welcome",
+    "youre welcome",
+    "you are welcome",
+    "your welcome",
+    "ur welcome",
+    "welcome",
+    "no problem",
+    "no worries",
+    "anytime",
+  ];
+  
+  // Check exact matches or contains
+  for (const pattern of englishPatterns) {
+    if (normalized.includes(pattern.toLowerCase()) || 
+        normalized === pattern.toLowerCase() ||
+        text.toLowerCase().includes(pattern.toLowerCase())) {
+      return true;
+    }
+  }
+  
+  // Check Arabic patterns (common hallucinations)
+  const arabicPatterns = [
+    "عفواً",
+    "عفوا",
+    "أهلاً بك",
+    "أهلا بك",
+    "أهلاً",
+    "أهلا",
+    "مرحباً",
+    "مرحبا",
+  ];
+  
+  for (const pattern of arabicPatterns) {
+    if (text.includes(pattern)) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+// Strict filter for repeated character patterns (e.g., "JJJJJJ...", "AAAAAA...")
+function containsRepeatedCharacters(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length < 10) return false; // Too short to be a problem
+  
+  // Remove spaces to check for character repetition
+  const withoutSpaces = trimmed.replace(/\s+/g, '');
+  if (withoutSpaces.length < 10) return false;
+  
+  // Check if a single character repeats too many times
+  // If more than 70% of characters are the same, it's likely an artifact
+  const charCounts = new Map<string, number>();
+  for (const char of withoutSpaces) {
+    charCounts.set(char, (charCounts.get(char) || 0) + 1);
+  }
+  
+  const maxCount = Math.max(...Array.from(charCounts.values()));
+  const repetitionRatio = maxCount / withoutSpaces.length;
+  
+  // If single character makes up more than 70% of text, it's a repetition artifact
+  if (repetitionRatio > 0.7) {
+    return true;
+  }
+  
+  // Also check for short pattern repetition (e.g., "ABABABAB..." or "ABCABCABC...")
+  // Check 1-3 character patterns
+  for (let patternLen = 1; patternLen <= 3; patternLen++) {
+    if (withoutSpaces.length < patternLen * 5) continue;
+    
+    const pattern = withoutSpaces.substring(0, patternLen);
+    let matches = 0;
+    for (let i = 0; i < withoutSpaces.length - patternLen + 1; i += patternLen) {
+      if (withoutSpaces.substring(i, i + patternLen) === pattern) {
+        matches++;
+      } else {
+        break;
+      }
+    }
+    
+    // If pattern repeats more than 5 times consecutively, it's likely an artifact
+    if (matches >= 5) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
 export async function POST(request: Request) {
   const startTime = Date.now();
 
@@ -150,9 +245,31 @@ export async function POST(request: Request) {
       );
     }
 
+    // STRICT FILTER: If repeated characters detected in input, completely ignore
+    if (containsRepeatedCharacters(trimmedText)) {
+      console.log(`[Translate API] STRICT FILTER: Detected repeated character pattern in input - returning empty`);
+      return NextResponse.json({ 
+        text: "",
+        cached: false,
+        processingTime: Date.now() - startTime,
+        filtered: true
+      });
+    }
+
     // STRICT FILTER: If "Thank you for watching" is detected in input, completely ignore
     if (containsThankYouForWatching(trimmedText)) {
       console.log(`[Translate API] STRICT FILTER: Detected "Thank you for watching" in input - returning empty`);
+      return NextResponse.json({ 
+        text: "",
+        cached: false,
+        processingTime: Date.now() - startTime,
+        filtered: true
+      });
+    }
+
+    // STRICT FILTER: If hallucinations like "you're welcome" are detected in input, completely ignore
+    if (containsHallucination(trimmedText)) {
+      console.log(`[Translate API] STRICT FILTER: Detected hallucination in input - returning empty`);
       return NextResponse.json({ 
         text: "",
         cached: false,
@@ -180,14 +297,22 @@ export async function POST(request: Request) {
     // Check cache first
     const cachedTranslation = getCachedTranslation(trimmedText);
     if (cachedTranslation) {
-      const responseTime = Date.now() - startTime;
-      console.log(`[Translate API] Cached response in ${responseTime}ms`);
-      
-      return NextResponse.json({ 
-        text: cachedTranslation,
-        cached: true,
-        processingTime: responseTime
-      });
+      // STRICT FILTER: Even cached translations must pass filters
+      if (containsRepeatedCharacters(cachedTranslation) ||
+          containsThankYouForWatching(cachedTranslation) ||
+          containsHallucination(cachedTranslation)) {
+        console.log(`[Translate API] Cached translation failed filters - ignoring cache`);
+        // Continue to generate new translation instead
+      } else {
+        const responseTime = Date.now() - startTime;
+        console.log(`[Translate API] Cached response in ${responseTime}ms`);
+        
+        return NextResponse.json({ 
+          text: cachedTranslation,
+          cached: true,
+          processingTime: responseTime
+        });
+      }
     }
 
     // Perform translation with optimized prompt
@@ -220,9 +345,31 @@ RULES:
 
     let translation = completion.choices[0].message.content ?? "";
     
+    // STRICT FILTER: If repeated characters detected in translation output, return empty
+    if (containsRepeatedCharacters(translation)) {
+      console.log(`[Translate API] STRICT FILTER: Detected repeated character pattern in translation - returning empty`);
+      return NextResponse.json({ 
+        text: "",
+        cached: false,
+        processingTime: Date.now() - startTime,
+        filtered: true
+      });
+    }
+    
     // STRICT FILTER: If "Thank you for watching" is detected in translation output, return empty
     if (containsThankYouForWatching(translation)) {
       console.log(`[Translate API] STRICT FILTER: Detected "Thank you for watching" in translation - returning empty`);
+      return NextResponse.json({ 
+        text: "",
+        cached: false,
+        processingTime: Date.now() - startTime,
+        filtered: true
+      });
+    }
+    
+    // STRICT FILTER: If hallucinations like "you're welcome" are detected in translation output, return empty
+    if (containsHallucination(translation)) {
+      console.log(`[Translate API] STRICT FILTER: Detected hallucination in translation - returning empty`);
       return NextResponse.json({ 
         text: "",
         cached: false,

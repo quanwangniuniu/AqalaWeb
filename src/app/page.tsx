@@ -11,6 +11,53 @@ import RoomSelector from "@/components/RoomSelector";
 import RoomManager from "@/components/RoomManager";
 import UserMenu from "@/components/UserMenu";
 
+// Client-side filter for hallucinations
+function containsHallucination(text: string): boolean {
+  const normalized = text.toLowerCase().trim();
+  
+  // English patterns for "you're welcome" and similar
+  const englishPatterns = [
+    "you're welcome",
+    "youre welcome",
+    "you are welcome",
+    "your welcome",
+    "ur welcome",
+    "welcome",
+    "no problem",
+    "no worries",
+    "anytime",
+  ];
+  
+  // Check exact matches or contains
+  for (const pattern of englishPatterns) {
+    if (normalized.includes(pattern.toLowerCase()) || 
+        normalized === pattern.toLowerCase() ||
+        text.toLowerCase().includes(pattern.toLowerCase())) {
+      return true;
+    }
+  }
+  
+  // Check Arabic patterns (common hallucinations)
+  const arabicPatterns = [
+    "عفواً",
+    "عفوا",
+    "أهلاً بك",
+    "أهلا بك",
+    "أهلاً",
+    "أهلا",
+    "مرحباً",
+    "مرحبا",
+  ];
+  
+  for (const pattern of arabicPatterns) {
+    if (text.includes(pattern)) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
 export default function Home() {
   const { user, loading, signOut } = useAuth();
   const { currentRoom, translations, addLocalTranslation, recordingState, updateRecordingState } = useRoom();
@@ -74,6 +121,12 @@ export default function Home() {
         if (!translateRes.ok) throw new Error("Translation failed");
 
         const { text: englishText } = await translateRes.json();
+
+        // CLIENT-SIDE FILTER: Check for hallucinations before adding translation
+        if (containsHallucination(arabicText) || containsHallucination(englishText)) {
+          console.log("[Client] STRICT FILTER: Detected hallucination - skipping translation");
+          return;
+        }
 
         // Add translation to local state immediately (will show on screen right away)
         // RoomContext will attempt to save to Firestore using client SDK
